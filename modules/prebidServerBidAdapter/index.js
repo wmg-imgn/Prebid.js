@@ -542,6 +542,16 @@ const OPEN_RTB_PROTOCOL = {
         // OpenRTB response contains the adunit code and bidder name. These are
         // combined to create a unique key for each bid since an id isn't returned
         bidIdMap[`${adUnit.code}${bid.bidder}`] = bid.bid_id;
+
+        // check for and store valid aliases to add to the request
+        if (adapterManager.aliasRegistry[bid.bidder]) {
+          const bidder = adapterManager.bidderRegistry[bid.bidder];
+          // adding alias only if alias source bidder exists and alias isn't configured to be standalone
+          // pbs adapter
+          if (bidder && !bidder.getSpec().skipPbsAliasing) {
+            aliases[bid.bidder] = adapterManager.aliasRegistry[bid.bidder];
+          }
+        }
       });
 
       let mediaTypes = {};
@@ -632,6 +642,23 @@ const OPEN_RTB_PROTOCOL = {
         utils.deepSetValue(imp, 'ext.prebid.storedauctionresponse.id', storedAuctionResponseBid.storedAuctionResponse.toString());
       }
 
+      const getFloorBid = find(firstBidRequest.bids, bid => bid.adUnitCode === adUnit.code && typeof bid.getFloor === 'function');
+
+      if (getFloorBid) {
+        let floorInfo;
+        try {
+          floorInfo = getFloorBid.getFloor({
+            currency: config.getConfig('currency.adServerCurrency') || DEFAULT_S2S_CURRENCY,
+          });
+        } catch (e) {
+          utils.logError('PBS: getFloor threw an error: ', e);
+        }
+        if (floorInfo && floorInfo.currency && !isNaN(parseFloat(floorInfo.floor))) {
+          imp.bidfloor = parseFloat(floorInfo.floor);
+          imp.bidfloorcur = floorInfo.currency
+        }
+      }
+
       if (imp.banner || imp.video || imp.native) {
         imps.push(imp);
       }
@@ -689,7 +716,7 @@ const OPEN_RTB_PROTOCOL = {
     }
 
     if (!utils.isEmpty(aliases)) {
-      request.ext.prebid.aliases = { ...request.ext.prebid.aliases, ...aliases };
+      request.ext.prebid.aliases = {...request.ext.prebid.aliases, ...aliases};
     }
 
     const bidUserIdAsEids = utils.deepAccess(bidRequests, '0.bids.0.userIdAsEids');
